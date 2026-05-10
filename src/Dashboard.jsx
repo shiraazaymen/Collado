@@ -3,6 +3,7 @@ import { auth, db } from "./firebase";
 import { signOut } from "firebase/auth";
 import { collection, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
 
+const TARGET = 75;
 const MONTHS = ["January","February","March","April","May","June",
   "July","August","September","October","November","December"];
 const DAYS_SHORT = ["Su","Mo","Tu","We","Th","Fr","Sa"];
@@ -40,9 +41,6 @@ export default function Dashboard({user, onNavigate}){
   const [showAdd,  setShowAdd]  = useState(false);
   const [calIn,    setCalIn]    = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [target,   setTarget]   = useState(75);
-  const [showTargetModal, setShowTargetModal] = useState(false);
-  const [targetInput,     setTargetInput]     = useState("75");
   const [exams,    setExams]    = useState(() => {
     try {
       const saved = localStorage.getItem(`ktu_exams_${uid}`);
@@ -59,13 +57,6 @@ export default function Dashboard({user, onNavigate}){
   useEffect(()=>{const t=setTimeout(()=>setCalIn(true),100);return()=>clearTimeout(t);},[]);
   useEffect(()=>onSnapshot(subjCol,snap=>setSubjects(snap.docs.map(d=>({id:d.id,...d.data()})))),[uid]);
   useEffect(()=>onSnapshot(calCol,snap=>{const obj={};snap.docs.forEach(d=>{obj[d.id]=d.data();});setCalData(obj);}),[uid]);
-  useEffect(()=>{
-    const settingsDoc = doc(db,"users",uid,"settings","preferences");
-    return onSnapshot(settingsDoc,(snap)=>{
-      if(snap.exists()){setTarget(snap.data().attendanceTarget??75);}
-      else{setShowTargetModal(true);}
-    });
-  },[uid]);
 
   const attendance = useCallback(()=>{
     const map={};
@@ -86,17 +77,17 @@ export default function Dashboard({user, onNavigate}){
   }
   function canSkip(sid){
     const{present,total}=attendance[sid]||{present:0,total:0};
-    let s=0;while(Math.round((present/(total+s+1))*100)>=target)s++;return s;
+    let s=0;while(Math.round((present/(total+s+1))*100)>=TARGET)s++;return s;
   }
   function needMore(sid){
     const{present,total}=attendance[sid]||{present:0,total:0};
-    if(pctFor(sid)>=target)return 0;
-    let e=0;while(Math.round(((present+e)/(total+e))*100)<target)e++;return e;
+    if(pctFor(sid)>=TARGET)return 0;
+    let e=0;while(Math.round(((present+e)/(total+e))*100)<TARGET)e++;return e;
   }
 
   const overallPct=subjects.length
     ?Math.round(subjects.reduce((a,s)=>a+pctFor(s.id),0)/subjects.length):0;
-  const safe=overallPct>=target;
+  const safe=overallPct>=TARGET;
 
   async function markDay(dk,sid,status){
     await setDoc(doc(db,"users",uid,"calendar",dk),{...(calData[dk]||{}),[sid]:status},{merge:true});
@@ -113,13 +104,6 @@ export default function Dashboard({user, onNavigate}){
     setExams(drafts);
     localStorage.setItem(`ktu_exams_${uid}`,JSON.stringify(drafts));
     setShowExamEdit(false);
-  }
-  async function saveTarget(){
-    const val=parseInt(targetInput);
-    if(isNaN(val)||val<1||val>100)return;
-    await setDoc(doc(db,"users",uid,"settings","preferences"),{attendanceTarget:val},{merge:true});
-    setTarget(val);
-    setShowTargetModal(false);
   }
 
   function dayCompletion(dk){
@@ -142,13 +126,14 @@ export default function Dashboard({user, onNavigate}){
     {val:"N",label:"— No class",bg:"#141414", border:"#222",   color:"#555"},
   ];
 
+  // Exam countdown logic
   const now=new Date();now.setHours(0,0,0,0);
   const upcoming=exams.filter(e=>e.date).map(e=>{
     const d=new Date(e.date+"T00:00:00");
     return{...e,diff:Math.ceil((d-now)/86400000)};
   }).filter(e=>e.diff>=0).sort((a,b)=>a.diff-b.diff);
   const nextExam=upcoming[0];
-  const danger=overallPct<target&&nextExam&&nextExam.diff<=14;
+  const danger=overallPct<75&&nextExam&&nextExam.diff<=14;
 
   return(
     <div style={{minHeight:"100vh",background:"#070707",
@@ -163,7 +148,6 @@ export default function Dashboard({user, onNavigate}){
         @keyframes cardSlide{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:translateX(0)}}
         @keyframes panelSlide{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
         @keyframes overlayIn{from{opacity:0}to{opacity:1}}
-        @keyframes drawerSlide{from{transform:translateX(-100%);opacity:0}to{transform:translateX(0);opacity:1}}
         .card{animation:cardSlide 0.35s cubic-bezier(.22,1,.36,1) both;}
         .cal-wrap{animation:calEnter 0.5s cubic-bezier(.22,1,.36,1) both;}
         .day-cell{animation:dayPop 0.25s cubic-bezier(.34,1.56,.64,1) both;}
@@ -185,99 +169,107 @@ export default function Dashboard({user, onNavigate}){
 
       {/* Topbar */}
       <header style={{width:"100%",display:"flex",alignItems:"center",
-  justifyContent:"space-between",padding:"13px 16px",
-  borderBottom:"1px solid #111",background:"#0a0a0a",
-  position:"sticky",top:0,zIndex:30}}>
-  <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-    <button onClick={()=>setMenuOpen(o=>!o)} style={{
-      background:"transparent",border:"1px solid #1a1a1a",
-      borderRadius:"6px",cursor:"pointer",
-      display:"flex",flexDirection:"column",gap:"3px",
-      alignItems:"center",justifyContent:"center",width:34,height:32,padding:0}}>
-      <span style={{display:"block",width:14,height:1.5,background:"#444",borderRadius:2,
-        transition:"all 0.3s",
-        transform:menuOpen?"rotate(45deg) translate(3px,3px)":"none"}}/>
-      <span style={{display:"block",width:14,height:1.5,background:"#444",borderRadius:2,
-        transition:"all 0.3s",opacity:menuOpen?0:1}}/>
-      <span style={{display:"block",width:14,height:1.5,background:"#444",borderRadius:2,
-        transition:"all 0.3s",
-        transform:menuOpen?"rotate(-45deg) translate(3px,-3px)":"none"}}/>
-    </button>
-    <span style={{fontSize:"16px",fontWeight:800,letterSpacing:"-0.8px"}}>
-      CollaDO<span style={{color:"#282828",fontWeight:500}}>.track</span>
-    </span>
-  </div>
-  <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
-    <span className="hide-mobile" style={{color:"#282828",fontSize:"12px",
-      maxWidth:"180px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
-      {user.email}
-    </span>
-    <button onClick={()=>signOut(auth)} style={{
-      background:"transparent",border:"1px solid #1a1a1a",color:"#444",
-      padding:"5px 12px",borderRadius:"6px",cursor:"pointer",
-      fontSize:"12px",fontWeight:600,fontFamily:"inherit"}}>Sign out</button>
-  </div>
-  {menuOpen&&(
-    <div style={{position:"fixed",inset:0,zIndex:200,display:"flex"}}
-      onClick={()=>setMenuOpen(false)}>
-      <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.6)",
-        animation:"overlayIn 0.25s ease both"}}/>
-      <div style={{position:"relative",width:"260px",height:"100%",
-        background:"#0d0d0d",borderRight:"1px solid #1a1a1a",
-        display:"flex",flexDirection:"column",
-        animation:"drawerSlide 0.3s cubic-bezier(.22,1,.36,1) both",
-        zIndex:201}}
-        onClick={e=>e.stopPropagation()}>
-        <div style={{padding:"20px 20px 16px",borderBottom:"1px solid #111"}}>
-          <p style={{fontSize:"18px",fontWeight:800,letterSpacing:"-0.8px",color:"#fff"}}>CollaDO</p>
-          <p style={{fontSize:"11px",color:"#333",marginTop:"4px",
-            overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+        justifyContent:"space-between",padding:"13px 16px",
+        borderBottom:"1px solid #111",background:"#0a0a0a",
+        position:"sticky",top:0,zIndex:30}}>
+        <span style={{fontSize:"16px",fontWeight:800,letterSpacing:"-0.8px"}}>
+          CollaDO<span style={{color:"#282828",fontWeight:500}}>.track</span>
+        </span>
+        <div style={{display:"flex",alignItems:"center",gap:"10px"}}>
+          <span className="hide-mobile" style={{color:"#282828",fontSize:"12px",
+            maxWidth:"180px",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
             {user.email}
-          </p>
-        </div>
-        <div style={{flex:1,padding:"12px 10px"}}>
-          {[
-            {label:"Dashboard", page:"dashboard"},
-            {label:"Tasks",     page:"reminders"},
-            {label:"Pomodoro",  page:"pomodoro"},
-          ].map(item=>(
-            <button key={item.page} onClick={()=>{setMenuOpen(false);onNavigate(item.page);}}
-              style={{width:"100%",padding:"12px 14px",background:"transparent",
-                border:"none",borderRadius:"10px",color:"#666",
-                fontSize:"14px",fontWeight:600,fontFamily:"inherit",
-                cursor:"pointer",textAlign:"left",display:"flex",
-                alignItems:"center",gap:"12px",marginBottom:"4px",
-                transition:"background 0.15s, color 0.15s"}}
-              onMouseOver={e=>{e.currentTarget.style.background="#1a1a1a";e.currentTarget.style.color="#fff";}}
-              onMouseOut={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="#666";}}>
-              {item.label}
-            </button>
-          ))}
-        </div>
-        <div style={{padding:"16px",borderTop:"1px solid #111"}}>
-          <button onClick={()=>{setTargetInput(String(target));setShowTargetModal(true);setMenuOpen(false);}}
-            style={{width:"100%",padding:"11px",background:"transparent",
-              border:"1px solid #1e1e1e",color:"#444",borderRadius:"10px",
-              cursor:"pointer",fontSize:"13px",fontWeight:600,fontFamily:"inherit",
-              marginBottom:"8px",transition:"border-color 0.15s,color 0.15s"}}
-            onMouseOver={e=>{e.currentTarget.style.borderColor="#4ade80";e.currentTarget.style.color="#4ade80";}}
-            onMouseOut={e=>{e.currentTarget.style.borderColor="#1e1e1e";e.currentTarget.style.color="#444";}}>
-            🎯 Target: {target}%
+          </span>
+          <div style={{position:"relative"}}>
+  <button onClick={()=>setMenuOpen(o=>!o)} style={{
+    background:"transparent",border:"1px solid #1a1a1a",
+    borderRadius:"6px",cursor:"pointer",
+    display:"flex",flexDirection:"column",gap:"3px",
+    alignItems:"center",justifyContent:"center",width:34,height:32,padding:0}}>
+    <span style={{display:"block",width:14,height:1.5,
+      background:"#444",borderRadius:2,
+      transition:"all 0.3s",
+      transform:menuOpen?"rotate(45deg) translate(3px,3px)":"none"}}/>
+    <span style={{display:"block",width:14,height:1.5,
+      background:"#444",borderRadius:2,
+      transition:"all 0.3s",
+      opacity:menuOpen?0:1}}/>
+    <span style={{display:"block",width:14,height:1.5,
+      background:"#444",borderRadius:2,
+      transition:"all 0.3s",
+      transform:menuOpen?"rotate(-45deg) translate(3px,-3px)":"none"}}/>
+  </button>
+</div>
+
+{/* Left slide drawer */}
+{menuOpen&&(
+  <div style={{position:"fixed",inset:0,zIndex:200,display:"flex"}}
+    onClick={()=>setMenuOpen(false)}>
+    {/* Backdrop */}
+    <div style={{position:"absolute",inset:0,background:"rgba(0,0,0,0.6)",
+      animation:"overlayIn 0.25s ease both"}}/>
+    {/* Drawer */}
+    <div style={{position:"relative",width:"260px",height:"100%",
+      background:"#0d0d0d",borderRight:"1px solid #1a1a1a",
+      display:"flex",flexDirection:"column",
+      animation:"drawerSlide 0.3s cubic-bezier(.22,1,.36,1) both",
+      zIndex:201}}
+      onClick={e=>e.stopPropagation()}>
+
+      {/* Drawer header */}
+      <div style={{padding:"20px 20px 16px",borderBottom:"1px solid #111"}}>
+        <p style={{fontSize:"18px",fontWeight:800,letterSpacing:"-0.8px",color:"#fff"}}>
+          CollaDO
+        </p>
+        <p style={{fontSize:"11px",color:"#333",marginTop:"4px",
+          overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+          {user.email}
+        </p>
+      </div>
+
+      {/* Nav items */}
+      <div style={{flex:1,padding:"12px 10px"}}>
+        {[
+          {label:"Dashboard", page:"dashboard", icon:"📊"},
+          {label:"Tasks",     page:"reminders", icon:"✅"},
+          {label:"Pomodoro",  page:"pomodoro",  icon:"⏱"},
+        ].map(item=>(
+          <button key={item.page} onClick={()=>{setMenuOpen(false);onNavigate(item.page);}}
+            style={{width:"100%",padding:"12px 14px",background:"transparent",
+              border:"none",borderRadius:"10px",color:"#666",
+              fontSize:"14px",fontWeight:600,fontFamily:"inherit",
+              cursor:"pointer",textAlign:"left",display:"flex",
+              alignItems:"center",gap:"12px",marginBottom:"4px",
+              transition:"background 0.15s, color 0.15s"}}
+            onMouseOver={e=>{e.currentTarget.style.background="#1a1a1a";e.currentTarget.style.color="#fff";}}
+            onMouseOut={e=>{e.currentTarget.style.background="transparent";e.currentTarget.style.color="#666";}}>
+            <span style={{fontSize:"16px"}}>{item.icon}</span>
+            {item.label}
           </button>
-          <button onClick={()=>signOut(auth)} style={{
-            width:"100%",padding:"11px",background:"transparent",
-            border:"1px solid #1e1e1e",color:"#444",borderRadius:"10px",
-            cursor:"pointer",fontSize:"13px",fontWeight:600,fontFamily:"inherit",
-            transition:"border-color 0.15s,color 0.15s"}}
-            onMouseOver={e=>{e.currentTarget.style.borderColor="#f87171";e.currentTarget.style.color="#f87171";}}
-            onMouseOut={e=>{e.currentTarget.style.borderColor="#1e1e1e";e.currentTarget.style.color="#444";}}>
-            Sign out
-          </button>
-        </div>
+        ))}
+      </div>
+
+      {/* Sign out */}
+      <div style={{padding:"16px",borderTop:"1px solid #111"}}>
+        <button onClick={()=>signOut(auth)} style={{
+          width:"100%",padding:"11px",background:"transparent",
+          border:"1px solid #1e1e1e",color:"#444",borderRadius:"10px",
+          cursor:"pointer",fontSize:"13px",fontWeight:600,fontFamily:"inherit",
+          transition:"border-color 0.15s,color 0.15s"}}
+          onMouseOver={e=>{e.currentTarget.style.borderColor="#f87171";e.currentTarget.style.color="#f87171";}}
+          onMouseOut={e=>{e.currentTarget.style.borderColor="#1e1e1e";e.currentTarget.style.color="#444";}}>
+          Sign out
+        </button>
       </div>
     </div>
-  )}
-</header>
+  </div>
+)}
+          <button onClick={()=>signOut(auth)} style={{
+            background:"transparent",border:"1px solid #1a1a1a",color:"#444",
+            padding:"5px 12px",borderRadius:"6px",cursor:"pointer",
+            fontSize:"12px",fontWeight:600,fontFamily:"inherit"}}>Sign out</button>
+        </div>
+      </header>
 
       <main style={{width:"100%",maxWidth:"900px",margin:"0 auto",
         padding:"16px clamp(16px,4vw,48px) 80px",boxSizing:"border-box"}}>
@@ -309,7 +301,7 @@ export default function Dashboard({user, onNavigate}){
                     <p style={{color:"#f87171",fontSize:"11px",fontWeight:600}}>
                       ⚠ {overallPct}% attendance — risk of exam block!
                     </p>
-                  ):overallPct<target?(
+                  ):overallPct<75?(
                     <p style={{color:"#facc15",fontSize:"11px"}}>
                       Attendance low — focus this week to avoid block
                     </p>
@@ -410,17 +402,8 @@ export default function Dashboard({user, onNavigate}){
               <span style={{fontSize:"clamp(14px,4vw,20px)",letterSpacing:0,fontWeight:600}}>%</span>
             </div>
             <p style={{color:"#282828",fontSize:"11px",marginTop:"6px",fontWeight:500}}>
-              {safe?`✓ above ${target}% — you're good`:`⚠ below ${target}% — attend more`}
+              {safe?"✓ above 75% — you're good":"⚠ below 75% — attend more"}
             </p>
-            <button onClick={()=>{setTargetInput(String(target));setShowTargetModal(true);}}
-              style={{background:"transparent",border:"1px dashed #1a1a1a",
-                borderRadius:"6px",padding:"3px 8px",color:"#2a2a2a",
-                cursor:"pointer",fontSize:"10px",fontFamily:"inherit",
-                marginTop:"8px",fontWeight:600,transition:"color 0.15s,border-color 0.15s"}}
-              onMouseOver={e=>{e.currentTarget.style.color="#555";e.currentTarget.style.borderColor="#333";}}
-              onMouseOut={e=>{e.currentTarget.style.color="#2a2a2a";e.currentTarget.style.borderColor="#1a1a1a";}}>
-              ✎ Target: {target}%
-            </button>
           </div>
           <div style={{position:"relative",width:72,height:72,flexShrink:0}}>
             <Ring pct={overallPct} size={72} stroke={5} color={safe?"#4ade80":"#f87171"}/>
@@ -445,10 +428,10 @@ export default function Dashboard({user, onNavigate}){
               const{present,total}=attendance[s.id]||{present:0,total:0};
               const p=pctFor(s.id);
               let skipCount=0;
-              while(Math.round((present/(total+skipCount+1))*100)>=target)skipCount++;
+              while(Math.round((present/(total+skipCount+1))*100)>=TARGET)skipCount++;
               let needCount=0;
-              if(p<target){while(Math.round(((present+needCount)/(total+needCount))*100)<target)needCount++;}
-              const isSafe=p>=target;
+              if(p<TARGET){while(Math.round(((present+needCount)/(total+needCount))*100)<TARGET)needCount++;}
+              const isSafe=p>=TARGET;
               const atLimit=isSafe&&skipCount===0;
               return(
                 <div key={s.id} style={{display:"flex",alignItems:"center",
@@ -467,14 +450,14 @@ export default function Dashboard({user, onNavigate}){
                         <p style={{color:"#4ade80",fontSize:"12px",fontWeight:700}}>
                           Skip up to {skipCount} class{skipCount>1?"es":""}
                         </p>
-                        <p style={{color:"#1d3320",fontSize:"10px",marginTop:"1px"}}>still safe above {target}%</p>
+                        <p style={{color:"#1d3320",fontSize:"10px",marginTop:"1px"}}>still safe above 75%</p>
                       </div>
                     )}
                     {atLimit&&(
                       <div style={{background:"#1a1200",border:"1px solid #3a2e00",
                         borderRadius:"8px",padding:"6px 12px"}}>
                         <p style={{color:"#facc15",fontSize:"12px",fontWeight:700}}>⚠ Don't skip any</p>
-                        <p style={{color:"#3a2e00",fontSize:"10px",marginTop:"1px"}}>exactly at {target}% limit</p>
+                        <p style={{color:"#3a2e00",fontSize:"10px",marginTop:"1px"}}>exactly at 75% limit</p>
                       </div>
                     )}
                     {!isSafe&&(
@@ -483,7 +466,7 @@ export default function Dashboard({user, onNavigate}){
                         <p style={{color:"#f87171",fontSize:"12px",fontWeight:700}}>
                           Attend {needCount} more
                         </p>
-                        <p style={{color:"#3a1414",fontSize:"10px",marginTop:"1px"}}>to reach {target}%</p>
+                        <p style={{color:"#3a1414",fontSize:"10px",marginTop:"1px"}}>to reach 75%</p>
                       </div>
                     )}
                   </div>
@@ -497,11 +480,11 @@ export default function Dashboard({user, onNavigate}){
                 Total skippable across all subjects
               </p>
               <p style={{fontWeight:800,fontSize:"16px",letterSpacing:"-0.5px",
-                color:subjects.every(s=>pctFor(s.id)>=target)?"#4ade80":"#f87171"}}>
+                color:subjects.every(s=>pctFor(s.id)>=TARGET)?"#4ade80":"#f87171"}}>
                 {subjects.reduce((acc,s)=>{
                   const{present,total}=attendance[s.id]||{present:0,total:0};
                   let skip=0;
-                  while(Math.round((present/(total+skip+1))*100)>=target)skip++;
+                  while(Math.round((present/(total+skip+1))*100)>=TARGET)skip++;
                   return acc+skip;
                 },0)} classes
               </p>
@@ -512,7 +495,7 @@ export default function Dashboard({user, onNavigate}){
         {/* ── SUBJECT CARDS ── */}
         {subjects.map((s,i)=>{
           const p=pctFor(s.id);
-          const isSafe=p>=target;
+          const isSafe=p>=TARGET;
           const{present,total}=attendance[s.id]||{present:0,total:0};
           const cur=(calData[todayKey]||{})[s.id]||"N";
           return(
@@ -740,51 +723,6 @@ export default function Dashboard({user, onNavigate}){
         )}
 
       </main>
-
-      {/* ── ATTENDANCE TARGET MODAL ── */}
-      {showTargetModal&&(
-        <div style={{position:"fixed",inset:0,background:"#000000cc",zIndex:300,
-          display:"flex",alignItems:"center",justifyContent:"center",padding:"20px",
-          animation:"overlayIn 0.2s ease both"}}>
-          <div style={{background:"#0f0f0f",border:"1px solid #1e1e1e",
-            borderRadius:"20px",padding:"24px",width:"100%",maxWidth:"340px",
-            animation:"panelSlide 0.25s cubic-bezier(.22,1,.36,1) both"}}>
-            <p style={{fontWeight:800,fontSize:"16px",marginBottom:"6px"}}>
-              Set Attendance Target 🎯
-            </p>
-            <p style={{color:"#333",fontSize:"12px",marginBottom:"20px"}}>
-              Different colleges have different requirements. What's yours?
-            </p>
-            <div style={{display:"flex",gap:"8px",marginBottom:"16px"}}>
-              {[75,80,85].map(v=>(
-                <button key={v} onClick={()=>setTargetInput(String(v))}
-                  style={{flex:1,padding:"10px",borderRadius:"8px",
-                    background:targetInput===String(v)?"#fff":"#141414",
-                    color:targetInput===String(v)?"#000":"#555",
-                    border:`1px solid ${targetInput===String(v)?"#fff":"#1e1e1e"}`,
-                    fontWeight:700,fontSize:"13px",cursor:"pointer",fontFamily:"inherit"}}>
-                  {v}%
-                </button>
-              ))}
-            </div>
-            <input type="number" min="1" max="100"
-              value={targetInput}
-              onChange={e=>setTargetInput(e.target.value)}
-              placeholder="Or type custom %"
-              style={{width:"100%",padding:"10px 12px",background:"#141414",
-                border:"1px solid #1e1e1e",borderRadius:"8px",color:"#fff",
-                fontSize:"14px",marginBottom:"14px",outline:"none",
-                fontFamily:"inherit",colorScheme:"dark"}}/>
-            <button onClick={saveTarget} style={{
-              width:"100%",padding:"12px",background:"#fff",color:"#000",
-              border:"none",borderRadius:"10px",cursor:"pointer",
-              fontWeight:800,fontSize:"14px",fontFamily:"inherit"}}>
-              Save & Continue
-            </button>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }
