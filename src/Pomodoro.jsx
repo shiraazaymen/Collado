@@ -227,13 +227,27 @@ const panelStyle = PANEL_BACKDROP;
   // Focus music opacity (Feature 3)
 
   return(
-    <div style={{
-      minHeight:"100vh",
-      background: !hasBg ? "#07070f" : undefined,
-      fontFamily:"'Outfit',sans-serif", color:"#fff",
-      width:"100%", overflowX:"hidden",
-      position:"relative",
-    }}>
+  <div style={{
+    minHeight:"100vh",
+    background: !hasBg
+      ? "radial-gradient(circle at 20% 20%, rgba(192,193,255,.16), transparent 34%), radial-gradient(circle at 82% 72%, rgba(76,215,246,.13), transparent 34%), linear-gradient(135deg,#101014 0%,#131318 45%,#0b0d14 100%)"
+      : undefined,
+    fontFamily:"Inter, Outfit, system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+    color:"#e5e2e3",
+    width:"100%",
+    overflowX:"hidden",
+    position:"relative",
+  }}>
+          {!hasBg && (
+        <div aria-hidden="true" style={{
+          position:"fixed",
+          inset:0,
+          zIndex:0,
+          pointerEvents:"none",
+          background:
+            "radial-gradient(circle at 18% 28%, rgba(192,193,255,.15) 0%, transparent 38%), radial-gradient(circle at 82% 70%, rgba(76,215,246,.12) 0%, transparent 38%)",
+        }}/>
+      )}
 
       {/* Hidden audio for ambient sounds */}
       <audio ref={ambientAudioRef} loop preload="none" style={{ display:"none" }}/>
@@ -248,53 +262,97 @@ const panelStyle = PANEL_BACKDROP;
 
       {/* ═══ TOPBAR ═══ */}
       <header style={{
-        position:"sticky", top:0, zIndex:50,
+        position:"sticky",
+        top:0,
+        zIndex:50,
+        height:64,
+        padding:"0 clamp(16px,4vw,40px)",
+        display:"flex",
+        alignItems:"center",
+        gap:14,
         background: hasBg
-          ? `rgba(7,7,15,${0.82 + wpOverlay*0.1})`
-          : "rgba(7,7,15,.88)",
-        backdropFilter:"blur(20px)",
-        borderBottom:"1px solid rgba(255,255,255,.06)",
-        display:"flex", alignItems:"center", gap:10,
-        padding:"0 16px", height:56,
+          ? `rgba(12,12,18,${0.70 + wpOverlay*0.14})`
+          : "rgba(255,255,255,.075)",
+        backdropFilter:"blur(28px)",
+        WebkitBackdropFilter:"blur(28px)",
+        borderBottom:"1px solid rgba(255,255,255,.10)",
+        boxShadow:"inset 0 1px 0 rgba(255,255,255,.14), 0 12px 40px rgba(0,0,0,.18)",
       }}>
         <button className="ctrl" aria-label="Go back to dashboard" onClick={()=>onNavigate("dashboard")} style={{
-          ...btnBase, width:36, height:36, borderRadius:10,
-          background:"rgba(255,255,255,.04)",
-          border:"1px solid rgba(255,255,255,.08)",
-          color:"rgba(255,255,255,.45)", fontSize:18,
-          display:"flex", alignItems:"center", justifyContent:"center",
+          ...btnBase,
+          width:40,
+          height:40,
+          borderRadius:999,
+          background:"rgba(255,255,255,.10)",
+          border:"1px solid rgba(255,255,255,.12)",
+          color:"rgba(229,226,227,.82)",
+          fontSize:18,
+          display:"flex",
+          alignItems:"center",
+          justifyContent:"center",
+          boxShadow:"inset 0 1px 0 rgba(255,255,255,.14)",
         }}>←</button>
 
-        <div style={{ display:"flex", alignItems:"baseline", gap:4 }}>
-          <span style={{ fontSize:20, fontWeight:800, letterSpacing:"-0.6px",
-            background:"linear-gradient(100deg,#a78bfa 0%,#f472b6 55%,#fb923c 100%)",
-            WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>
-            CollaDO
-          </span>
-          <span style={{ fontSize:10, color:"rgba(255,255,255,.2)", fontWeight:600, letterSpacing:"0.12em" }}>.focus</span>
-        </div>
-
+        <div style={{
+  display:"flex",
+  alignItems:"baseline",
+  gap:4,
+}}>
+  <span style={{
+    fontSize:20,
+    fontWeight:700,
+    letterSpacing:"-1.2px",
+    color:"rgba(245,245,247,.95)",
+    lineHeight:1,
+  }}>
+    CollaDO
+  </span>
+  <span style={{
+    fontSize:10,
+    fontWeight:600,
+    letterSpacing:"0.12em",
+    color:"rgba(245,245,247,.55)",
+    lineHeight:1,
+  }}>.focus</span>
+</div>
         <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:6 }}>
           {sessions > 0 && (
-            <div style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700,
+            <div style={{ padding:"4px 12px", borderRadius:20, fontSize:10, fontWeight:700,
               background:"rgba(52,211,153,.12)", border:"1px solid rgba(52,211,153,.28)", color:"#34d399" }}>
               {sessions} done ✓
             </div>
           )}
           <button className="icon-btn" onClick={()=>setShowWpPanel(p=>!p)} style={{
-            ...btnBase, padding:"5px 11px", borderRadius:9, fontSize:12, fontWeight:600,
-            background: hasBg ? "rgba(167,139,250,.1)" : "rgba(255,255,255,.04)",
-            border: hasBg ? "1px solid rgba(167,139,250,.3)" : "1px solid rgba(255,255,255,.09)",
-            color: hasBg ? "#a78bfa" : "rgba(255,255,255,.38)",
-            display:"flex", alignItems:"center", gap:5,
+            ...btnBase,
+            minHeight:40,
+            padding:"8px 15px",
+            borderRadius:999,
+            fontSize:12,
+            fontWeight:800,
+            letterSpacing:"0.04em",
+            background: hasBg ? "rgba(192,193,255,.16)" : "rgba(255,255,255,.10)",
+            border: hasBg ? "1px solid rgba(192,193,255,.28)" : "1px solid rgba(255,255,255,.12)",
+            color: hasBg ? "#c0c1ff" : "rgba(229,226,227,.82)",
+            display:"flex",
+            alignItems:"center",
+            gap:7,
+            boxShadow:"inset 0 1px 0 rgba(255,255,255,.14)",
           }}>
-            🖼 Wallpaper
+            Wallpaper
           </button>
           <button className="ctrl" onClick={openEdit} style={{
-            ...btnBase, padding:"5px 12px", borderRadius:9, fontSize:12, fontWeight:600,
-            background:"rgba(255,255,255,.04)", border:"1px solid rgba(255,255,255,.09)",
-            color:"rgba(255,255,255,.38)",
-          }}>Edit timer</button>
+            ...btnBase,
+            minHeight:40,
+            padding:"8px 15px",
+            borderRadius:999,
+            fontSize:10,
+            fontWeight:550,
+            letterSpacing:"0.04em",
+            background:"rgba(255,255,255,.10)",
+            border:"1px solid rgba(255,255,255,.12)",
+            color:"rgba(229,226,227,.82)",
+            boxShadow:"inset 0 1px 0 rgba(255,255,255,.14)",
+          }}>Edit</button>
         </div>
       </header>
 
@@ -538,20 +596,26 @@ const panelStyle = PANEL_BACKDROP;
           ))}
         </div>
 
-        {/* Ring card — Feature 2: enhanced glassmorphism */}
-        <div className="fu fu1 pop" style={{
-          ...glassCard,
-          padding:"32px 20px 28px",
-          background: hasBg
-            ? `rgba(8,8,20,${0.60 + wpOverlay*0.22})`
-            : "linear-gradient(135deg,#0f0f1c 0%,#130e1e 60%,#0c0f1a 100%)",
-          border:`1px solid ${effectiveBorder}`,
-          display:"flex", flexDirection:"column", alignItems:"center",
-          position:"relative", overflow:"hidden",
-          boxShadow: hasBg
-            ? `0 16px 48px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.08), 0 0 60px ${effectiveGlow}`
-            : `0 0 60px ${effectiveGlow}`,
-        }}>
+        {/* Ring card — Apple glass hero */}
+<div className="fu fu1 pop" style={{
+  padding:"clamp(34px,6vw,64px) clamp(20px,5vw,48px) 34px",
+  marginBottom:28,
+  borderRadius:40,
+  background: hasBg
+    ? `rgba(12,12,20,${0.56 + wpOverlay*0.22})`
+    : "linear-gradient(145deg,rgba(255,255,255,.105),rgba(255,255,255,.045))",
+  border:"1px solid rgba(255,255,255,.12)",
+  backdropFilter:"blur(32px)",
+  WebkitBackdropFilter:"blur(32px)",
+  display:"flex",
+  flexDirection:"column",
+  alignItems:"center",
+  position:"relative",
+  overflow:"hidden",
+  boxShadow: hasBg
+    ? `0 28px 80px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.16), 0 0 70px ${effectiveGlow}`
+    : `0 28px 80px rgba(0,0,0,.32), inset 0 1px 0 rgba(255,255,255,.16), 0 0 70px ${effectiveGlow}`,
+}}>
 
           <div style={{ position:"absolute", top:-60, right:-60, width:240, height:240,
             borderRadius:"50%", pointerEvents:"none",
@@ -559,24 +623,43 @@ const panelStyle = PANEL_BACKDROP;
             transition:"background 0.6s ease",
           }}/>
 
-          <div style={{ position:"relative", width:ringSize, height:ringSize,
-            display:"flex", alignItems:"center", justifyContent:"center" }}>
+          <div style={{
+  position:"relative",
+  width:ringSize,
+  height:ringSize,
+  display:"flex",
+  alignItems:"center",
+  justifyContent:"center",
+  filter:"drop-shadow(0 0 24px rgba(192,193,255,.24))",
+}}>
             <Ring pct={pct} size={ringSize} stroke={10} color={mode.color} accentColor={accentColor}/>
             <div style={{ position:"absolute", inset:0, display:"flex",
               flexDirection:"column", alignItems:"center", justifyContent:"center", gap:6 }}>
               <span
-                role="timer" aria-live="off"
-                aria-label={formatTimerAriaLabel(seconds, mode.label)}
-                style={{ fontSize:"clamp(48px,13vw,78px)", fontWeight:900,
-                letterSpacing:"-4px", lineHeight:1, color: accentColor || mode.color,
-                textShadow:`0 0 50px ${(accentColor||mode.color)}66`,
-                fontVariantNumeric:"tabular-nums", transition:"color 0.6s ease, text-shadow 0.6s ease" }}>
-                {fmt(seconds)}
-              </span>
-              <span style={{ fontSize:11, fontWeight:700, letterSpacing:"0.2em",
-                textTransform:"uppercase", color:"rgba(255,255,255,.3)" }}>
-                {mode.label}
-              </span>
+  role="timer" aria-live="off"
+  aria-label={formatTimerAriaLabel(seconds, mode.label)}
+  style={{
+    fontSize:"clamp(56px,14vw,86px)",
+    fontWeight:800,
+    letterSpacing:"-5px",
+    lineHeight:1,
+    color:"rgba(245,245,247,.96)",
+    textShadow:`0 0 42px ${effectiveGlow}, 0 0 80px rgba(192,193,255,.18)`,
+    fontVariantNumeric:"tabular-nums",
+    transition:"text-shadow 0.6s ease",
+  }}>
+  {fmt(seconds)}
+</span>
+              <span style={{
+  fontSize:12,
+  fontWeight:850,
+  letterSpacing:"0.22em",
+  textTransform:"uppercase",
+  color:"#4cd7f6",
+  marginTop:4,
+}}>
+  {mode.label}
+</span>
               {running && (
                 <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:4 }}>
                   <span className="pulse-dot" style={{ width:6, height:6, borderRadius:"50%",
