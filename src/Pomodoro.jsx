@@ -1,5 +1,13 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-
+import { useState, useEffect, useRef } from "react";
+import { usePomodoroTimer } from "./hooks/usePomodoroTimer";
+import { usePersistentPomodoro,usePersistSnapshot } from "./hooks/useLocalStorage";
+import { useWallpaper } from "./hooks/useWallpaper";
+import { useAmbientAudio } from "./hooks/useAmbientAudio";
+import { useFloatingPlayer } from "./hooks/useFloatingPlayer";
+import { STORAGE_KEYS } from "./utils/constants";
+import { formatTime, formatTimerAriaLabel } from "./utils/formatters";
+import { glassCardStyle, BTN_BASE,PANEL_BACKDROP } from "./styles/tokens";
+import WallpaperBackground from "./components/wallpaper/WallpaperBackground";
 // ─── CONSTANTS ─────────────────────────────────────────────────────────────
 
 const DEFAULT_MODES = [
@@ -57,38 +65,6 @@ const AMBIENT_SOUNDS = [
 
 function fmt(s){ return `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`; }
 
-function parseYouTubeId(url){
-  const patterns = [
-    /youtu\.be\/([^?&#]+)/,
-    /youtube\.com\/watch\?v=([^&#]+)/,
-    /youtube\.com\/embed\/([^?&#]+)/,
-    /music\.youtube\.com\/watch\?v=([^&#]+)/,
-  ];
-  for(const p of patterns){ const m = url.match(p); if(m) return m[1]; }
-  if(/^[a-zA-Z0-9_-]{11}$/.test(url.trim())) return url.trim();
-  return null;
-}
-
-function parseSpotifyEmbed(url){
-  const m = url.match(/spotify\.com\/(track|album|playlist|artist|episode)\/([a-zA-Z0-9]+)/);
-  if(m) return `https://open.spotify.com/embed/${m[1]}/${m[2]}?utm_source=generator&theme=0`;
-  return null;
-}
-
-// Debounce helper for localStorage writes
-function debounce(fn, ms){
-  let t;
-  return (...args) => { clearTimeout(t); t = setTimeout(()=>fn(...args), ms); };
-}
-
-// Feature 8: Extract dominant color from image (CSS-based approximation)
-function getWallpaperAccent(wallpaperValue){
-  if(wallpaperValue === "none") return null;
-  const wp = ALL_WALLPAPERS.find(w => w.value === wallpaperValue);
-  if(!wp || !wp.preview) return null;
-  return wp.preview; // use preview color as accent seed
-}
-
 // ─── SUBCOMPONENTS ───────────────────────────────────────────────────────────
 
 function Ring({ pct, size, stroke, color, accentColor }){
@@ -133,189 +109,107 @@ function Visualizer({ active, color }){
 
 // ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
 
-export default function Pomodoro({ onNavigate }){
+export default function Pomodoro({ onNavigate }) {
   // ── Core timer state ──
-  const [modes,    setModes]    = useState(() => {
-    try{ const s=localStorage.getItem("pomo_modes"); return s ? JSON.parse(s) : DEFAULT_MODES; }catch{ return DEFAULT_MODES; }
-  });
-  const [modeIdx,  setModeIdx]  = useState(() => {
-    try{ return Number(localStorage.getItem("pomo_modeIdx"))||0; }catch{ return 0; }
-  });
-  const [seconds,  setSeconds]  = useState(()=>{
-    try{
-      const m=localStorage.getItem("pomo_modes");
-      const idx=Number(localStorage.getItem("pomo_modeIdx"))||0;
-      const parsed=m?JSON.parse(m):DEFAULT_MODES;
-      return (parsed[idx]||DEFAULT_MODES[0]).minutes*60;
-    }catch{ return DEFAULT_MODES[0].minutes*60; }
-  });
-  const [running,  setRunning]  = useState(false);
-  const [sessions, setSessions] = useState(0);
-  const [cycles,   setCycles]   = useState(0);
-  const [log,      setLog]      = useState([]);
+const { initialValues } = usePersistentPomodoro();
+const {
+  modes, modeIdx, seconds, running, sessions, cycles, log, mode,
+  modeRemaining,
+  total, toggle, reset, skip, switchMode, saveSettings,
+} = usePomodoroTimer({
+  initialModes:   initialValues.modes,
+  initialModeIdx: initialValues.modeIdx,
+  initialValues,
+});
   const [showEdit, setShowEdit] = useState(false);
   const [editVals, setEditVals] = useState({ focus:25, short:5, long:15 });
 
   // ── Wallpaper state (Feature 1 + 4 + 7) ──
-  const [wallpaper,     setWallpaper]     = useState(()=>{ try{ return localStorage.getItem("pomo_wallpaper")||"none"; }catch{ return "none"; } });
-  const [customWpUrl,   setCustomWpUrl]   = useState(()=>{ try{ return localStorage.getItem("pomo_customWp")||""; }catch{ return ""; } });
-  const [wpOverlay,     setWpOverlay]     = useState(()=>{ try{ return Number(localStorage.getItem("pomo_overlay"))||0.55; }catch{ return 0.55; } });
-  const [showWpPanel,   setShowWpPanel]   = useState(false);
-  const [wpInputVal,    setWpInputVal]    = useState("");
+  const [showWpPanel, setShowWpPanel] = useState(false);
   const [wpCategory,    setWpCategory]    = useState("Nature");
-
-  // Feature 1: Cinematic transition state
-  const [prevWallpaper, setPrevWallpaper] = useState("none");
-  const [isTransitioning, setIsTransitioning] = useState(false);
-  const [nextWpLoaded, setNextWpLoaded]   = useState(true);
-
-  // Feature 7: Video wallpaper
-  const [videoWpUrl, setVideoWpUrl]     = useState(()=>{ try{ return localStorage.getItem("pomo_videoWp")||""; }catch{ return ""; } });
+  const [wpInputVal,    setWpInputVal]    = useState("");
   const [videoInputVal, setVideoInputVal] = useState("");
-
   const fileInputRef  = useRef(null);
   const videoInputRef = useRef(null);
-
-  // ── Music state (Feature 3 + 4) ──
-  const [showMusicPanel, setShowMusicPanel] = useState(false);
-  const [musicTab,       setMusicTab]       = useState(()=>{ try{ return localStorage.getItem("pomo_musicTab")||"spotify"; }catch{ return "spotify"; } });
-  const [spotifyInput,   setSpotifyInput]   = useState("");
-  const [ytInput,        setYtInput]        = useState("");
-  const [spotifyEmbed,   setSpotifyEmbed]   = useState(()=>{ try{ return localStorage.getItem("pomo_spotifyEmbed")||""; }catch{ return ""; } });
-  const [ytId,           setYtId]           = useState(()=>{ try{ return localStorage.getItem("pomo_ytId")||""; }catch{ return ""; } });
-  const [musicMinimized, setMusicMinimized] = useState(()=>{ try{ return localStorage.getItem("pomo_musicMin")==="1"; }catch{ return false; } });
+  const {
+  wallpaper, customWpUrl, videoWpUrl, wpOverlay, hasBg,
+  prevWallpaper, prevVisible, nextLoaded, accentColor,
+  applyPreset, applyCustomUrl, applyImageFile,
+  applyVideoUrl, applyVideoFile, clearWallpaper,
+  setWpOverlay,
+} = useWallpaper({
+  initialWallpaper:   initialValues.wallpaper,
+  initialCustomWpUrl: initialValues.customWpUrl,
+  initialVideoWpUrl:  initialValues.videoWpUrl,
+  initialOverlay:     initialValues.wpOverlay,
+});
 
   // Feature 10: Draggable floating player
-  const [playerPos,  setPlayerPos]  = useState(()=>{ try{ const s=localStorage.getItem("pomo_playerPos"); return s?JSON.parse(s):{right:20,bottom:20}; }catch{ return {right:20,bottom:20}; } });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragOffset   = useRef({x:0,y:0});
-  const playerRef    = useRef(null);
+  const {
+  playerRef, pos: playerPos, dragging: isDragging,
+  onMouseDown: onPlayerMouseDown,
+  onTouchStart: onPlayerTouchStart,
+} = useFloatingPlayer({ initialPos: initialValues.playerPos });
 
   // Feature 9: Ambient sounds
-  const [ambientKey,    setAmbientKey]    = useState("");
-  const [ambientVol,    setAmbientVol]    = useState(0.4);
-  const [ambientPlaying,setAmbientPlaying]= useState(false);
-  const ambientAudioRef = useRef(null);
-
-  // Feature 8: Theme accent from wallpaper
-  const [accentColor, setAccentColor] = useState(null);
+  const {
+  audioRef: ambientAudioRef,
+  activeKey: ambientKey,
+  playing: ambientPlaying,
+  volume: ambientVol,
+  setVolume: setAmbientVol,
+  toggle: toggleAmbient,
+} = useAmbientAudio();
 
   // ── Refs ──
   const intervalRef = useRef(null);
 
   // ── Computed ──
-  const mode     = modes[modeIdx];
-  const total    = mode.minutes * 60;
   const pct      = ((total - seconds) / total) * 100;
-  const ringSize = Math.min(260, (typeof window !== "undefined" ? window.innerWidth : 400) - 80);
-  const hasMusic = spotifyEmbed || ytId;
+  const ringSize =  Math.min(260, window.innerWidth - 80);
+
+// ── Persist Snapshot ──
+  usePersistSnapshot({
+  // Wallpaper
+  [STORAGE_KEYS.WALLPAPER]:  wallpaper,
+  [STORAGE_KEYS.CUSTOM_WP]:  customWpUrl,
+  [STORAGE_KEYS.VIDEO_WP]:   videoWpUrl,
+  [STORAGE_KEYS.OVERLAY]:    String(wpOverlay),
+
+  // Timer state — NO epoch values here; those are written directly in the hook
+  [STORAGE_KEYS.MODES]:         modes,
+  [STORAGE_KEYS.MODE_IDX]:      String(modeIdx),
+  [STORAGE_KEYS.SECONDS]:       String(seconds),
+  [STORAGE_KEYS.SESSIONS]:      String(sessions),
+  [STORAGE_KEYS.CYCLES]:        String(cycles),
+  [STORAGE_KEYS.LOG]:           log,
+  [STORAGE_KEYS.MODE_REMAINING]:modeRemaining,
+});
+// ── Keyboard Shortcuts ──
+useEffect(() => {
+  function onKey(e) {
+    if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+    if (e.code === "Space") { e.preventDefault(); toggle(); }
+    if (e.key === "r" || e.key === "R") reset();
+    if (e.key === "s" || e.key === "S") skip();
+    if (e.key === "1") switchMode(0);
+    if (e.key === "2") switchMode(1);
+    if (e.key === "3") switchMode(2);
+  }
+  window.addEventListener("keydown", onKey);
+  return () => window.removeEventListener("keydown", onKey);
+}, [toggle, reset, skip, switchMode]);
+
+useEffect(() => {
+  document.title = running
+    ? `${formatTime(seconds)} — ${mode.label} · CollaDO`
+    : "CollaDO · focus";
+  return () => { document.title = "CollaDO"; };
+}, [seconds, running, mode.label]);
 
   // Effective colors with accent override (Feature 8)
   const effectiveGlow   = accentColor ? `${accentColor}55` : mode.glow;
   const effectiveBorder = accentColor ? `${accentColor}44` : mode.border;
-  const effectivePill   = accentColor ? `${accentColor}18` : mode.pill;
-
-  // ── Feature 4: Debounced localStorage writes ──
-  const saveToLS = useCallback(debounce((key, val) => {
-    try{ localStorage.setItem(key, typeof val === "object" ? JSON.stringify(val) : String(val)); }catch{}
-  }, 300), []);
-
-  useEffect(()=>{ saveToLS("pomo_wallpaper",  wallpaper);     },[wallpaper]);
-  useEffect(()=>{ saveToLS("pomo_customWp",   customWpUrl);   },[customWpUrl]);
-  useEffect(()=>{ saveToLS("pomo_overlay",    wpOverlay);     },[wpOverlay]);
-  useEffect(()=>{ saveToLS("pomo_videoWp",    videoWpUrl);    },[videoWpUrl]);
-  useEffect(()=>{ saveToLS("pomo_musicTab",   musicTab);      },[musicTab]);
-  useEffect(()=>{ saveToLS("pomo_spotifyEmbed",spotifyEmbed); },[spotifyEmbed]);
-  useEffect(()=>{ saveToLS("pomo_ytId",       ytId);          },[ytId]);
-  useEffect(()=>{ saveToLS("pomo_musicMin",   musicMinimized?"1":"0"); },[musicMinimized]);
-  useEffect(()=>{ saveToLS("pomo_playerPos",  playerPos);     },[playerPos]);
-  useEffect(()=>{ saveToLS("pomo_modes",      modes);         },[modes]);
-  useEffect(()=>{ saveToLS("pomo_modeIdx",    modeIdx);       },[modeIdx]);
-
-  // ── Feature 8: Extract accent color ──
-  useEffect(()=>{
-    if(wallpaper === "none"){ setAccentColor(null); return; }
-    const accent = getWallpaperAccent(wallpaper);
-    if(accent){
-      // Smooth transition: set after short delay
-      const t = setTimeout(()=>setAccentColor(accent), 300);
-      return ()=>clearTimeout(t);
-    }
-  },[wallpaper]);
-
-  // ── Feature 1: Cinematic wallpaper transition ──
-  function transitionWallpaper(newVal){
-    if(newVal === wallpaper) return;
-    if(newVal === "none"){ setPrevWallpaper(wallpaper); setWallpaper(newVal); return; }
-
-    setIsTransitioning(true);
-    setPrevWallpaper(wallpaper);
-    setNextWpLoaded(false);
-
-    const img = new Image();
-    img.onload = ()=>{
-      setNextWpLoaded(true);
-      setWallpaper(newVal);
-      setTimeout(()=>{ setIsTransitioning(false); setPrevWallpaper("none"); }, 700);
-    };
-    img.onerror = ()=>{
-      setNextWpLoaded(true);
-      setWallpaper(newVal);
-      setIsTransitioning(false);
-    };
-    img.src = newVal;
-  }
-
-  // ── Timer logic ──
-  useEffect(()=>{
-    if(running){
-      intervalRef.current = setInterval(()=>{
-        setSeconds(s=>{
-          if(s<=1){ clearInterval(intervalRef.current); setRunning(false); handleComplete(); return 0; }
-          return s-1;
-        });
-      },1000);
-    } else { clearInterval(intervalRef.current); }
-    return ()=>clearInterval(intervalRef.current);
-  },[running, modeIdx]);
-
-  // ── Feature 3: Intelligent Focus Music Mode ──
-  // musicMinimized auto-expands when focus starts, dims on pause
-  useEffect(()=>{
-    if(running && modeIdx === 0 && hasMusic){
-      setMusicMinimized(false); // auto-expand on focus start
-    }
-  },[running, modeIdx]);
-
-  function handleComplete(){
-    const now = new Date().toLocaleTimeString("en-IN",{ hour:"2-digit", minute:"2-digit" });
-    if(modeIdx===0){
-      const newSessions = sessions+1;
-      setSessions(newSessions);
-      setLog(l=>[`✓ Focus session — ${now}`,...l].slice(0,20));
-      if(newSessions%4===0){ setCycles(c=>c+1); switchMode(2); }
-      else switchMode(1);
-    } else {
-      setLog(l=>[`☕ Break ended — ${now}`,...l].slice(0,20));
-      switchMode(0);
-    }
-  }
-
-  function switchMode(idx){ setModeIdx(idx); setSeconds(modes[idx].minutes*60); setRunning(false); }
-  function reset(){ setRunning(false); setSeconds(mode.minutes*60); }
-  function skipToNext(){ setRunning(false); switchMode(modeIdx===0?1:0); }
-
-  function saveSettings(){
-    const updated=[
-      { ...modes[0], minutes:Math.max(1,Math.min(90,Number(editVals.focus))) },
-      { ...modes[1], minutes:Math.max(1,Math.min(30,Number(editVals.short))) },
-      { ...modes[2], minutes:Math.max(1,Math.min(60,Number(editVals.long)))  },
-    ];
-    setModes(updated);
-    setSeconds(updated[modeIdx].minutes*60);
-    setRunning(false);
-    setShowEdit(false);
-  }
 
   function clampEdit(key,val){ setEditVals(e=>({...e,[key]:parseInt(val)||1})); }
   function openEdit(){
@@ -323,145 +217,14 @@ export default function Pomodoro({ onNavigate }){
     setShowEdit(true);
   }
 
-  // ── Wallpaper handlers ──
-  function applyPreset(val){ transitionWallpaper(val); setVideoWpUrl(""); }
-  function applyCustomUrl(){
-    if(wpInputVal.trim()){ transitionWallpaper(wpInputVal.trim()); setCustomWpUrl(wpInputVal.trim()); setVideoWpUrl(""); }
-  }
-  function handleFileUpload(e){
-    const file = e.target.files?.[0];
-    if(!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => { transitionWallpaper(ev.target.result); setCustomWpUrl(ev.target.result); setVideoWpUrl(""); };
-    reader.readAsDataURL(file);
-  }
-  // Feature 7: video wallpaper handler
-  function applyVideoWp(){
-    if(videoInputVal.trim()){ setVideoWpUrl(videoInputVal.trim()); setWallpaper("none"); }
-  }
-  function handleVideoUpload(e){
-    const file = e.target.files?.[0];
-    if(!file) return;
-    const url = URL.createObjectURL(file);
-    setVideoWpUrl(url); setWallpaper("none");
-  }
+// computed each render since they depend on hasBg/wpOverlay
+const glassCard = glassCardStyle(hasBg, wpOverlay);
+const btnBase   = BTN_BASE;
 
-  // ── Music handlers ──
-  function loadSpotify(){
-    const embed = parseSpotifyEmbed(spotifyInput);
-    if(embed){ setSpotifyEmbed(embed); setMusicMinimized(false); }
-    else alert("Paste a valid Spotify link (track, playlist, album, artist, or episode).");
-  }
-  function loadYouTube(){
-    const id = parseYouTubeId(ytInput);
-    if(id){ setYtId(id); setMusicMinimized(false); }
-    else alert("Paste a valid YouTube or YT Music link, or an 11-character video ID.");
-  }
-  function clearMusic(){ setSpotifyEmbed(""); setYtId(""); }
-
-  // ── Feature 9: Ambient sounds ──
-  useEffect(()=>{
-    if(!ambientAudioRef.current) return;
-    ambientAudioRef.current.volume = ambientVol;
-  },[ambientVol]);
-
-  function toggleAmbient(key){
-    const sound = AMBIENT_SOUNDS.find(s=>s.key===key);
-    if(!sound) return;
-    if(ambientKey === key && ambientPlaying){
-      ambientAudioRef.current?.pause();
-      setAmbientPlaying(false);
-    } else {
-      if(ambientAudioRef.current){
-        ambientAudioRef.current.pause();
-        ambientAudioRef.current.src = sound.src;
-        ambientAudioRef.current.loop = true;
-        ambientAudioRef.current.volume = ambientVol;
-        ambientAudioRef.current.play().catch(()=>{});
-      }
-      setAmbientKey(key);
-      setAmbientPlaying(true);
-    }
-  }
-
-  // ── Feature 10: Draggable player ──
-  function onPlayerMouseDown(e){
-    if(e.target.tagName === "BUTTON" || e.target.tagName === "IFRAME") return;
-    e.preventDefault();
-    const rect = playerRef.current.getBoundingClientRect();
-    dragOffset.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-    setIsDragging(true);
-  }
-
-  useEffect(()=>{
-    if(!isDragging) return;
-    function onMove(e){
-      const x = e.clientX - dragOffset.current.x;
-      const y = e.clientY - dragOffset.current.y;
-      const maxX = window.innerWidth  - (playerRef.current?.offsetWidth  || 300) - 10;
-      const maxY = window.innerHeight - (playerRef.current?.offsetHeight || 200) - 10;
-      const cx = Math.max(10, Math.min(x, maxX));
-      const cy = Math.max(10, Math.min(y, maxY));
-      setPlayerPos({ left: cx, top: cy, right:"auto", bottom:"auto" });
-    }
-    function onUp(){
-      setIsDragging(false);
-      // corner snap
-      if(!playerRef.current) return;
-      const rect = playerRef.current.getBoundingClientRect();
-      const cx = rect.left, cy = rect.top;
-      const W = window.innerWidth, H = window.innerHeight;
-      const snapR = cx + rect.width  > W/2;
-      const snapB = cy + rect.height > H/2;
-      setPlayerPos({
-        left:  snapR ? "auto" : 20,
-        right: snapR ? 20     : "auto",
-        top:   snapB ? "auto" : 20,
-        bottom:snapB ? 20     : "auto",
-      });
-    }
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup",   onUp);
-    return ()=>{ window.removeEventListener("mousemove",onMove); window.removeEventListener("mouseup",onUp); };
-  },[isDragging]);
-
-  // ── Styles ──
-  const card = {
-    background: wallpaper === "none" && !videoWpUrl
-      ? "#0f0f1c"
-      : `rgba(10,10,22,${0.72 + wpOverlay*0.2})`,
-    borderRadius:20,
-    border:"1px solid rgba(255,255,255,.07)",
-    marginBottom:12,
-    backdropFilter: (wallpaper !== "none" || videoWpUrl) ? "blur(18px)" : "none",
-    WebkitBackdropFilter: (wallpaper !== "none" || videoWpUrl) ? "blur(18px)" : "none",
-    boxShadow: (wallpaper !== "none" || videoWpUrl) ? "0 8px 32px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06)" : "none",
-  };
-
-  const glassCard = {
-    ...card,
-    background: (wallpaper !== "none" || videoWpUrl)
-      ? `rgba(8,8,20,${0.68 + wpOverlay*0.22})`
-      : "#0f0f1c",
-    border:`1px solid rgba(255,255,255,.09)`,
-  };
-
-  const btnBase = {
-    cursor:"pointer", fontFamily:"'Outfit',sans-serif",
-    outline:"none", transition:"all .15s",
-  };
-
-  const panelStyle = {
-    position:"fixed", inset:0, zIndex:200,
-    background:"rgba(0,0,0,.82)", backdropFilter:"blur(14px)",
-    display:"flex", alignItems:"center", justifyContent:"center",
-    padding:20, animation:"overlayIn .2s ease both",
-  };
-
-  const hasBg = wallpaper !== "none" || !!videoWpUrl;
+// then inside component:
+const panelStyle = PANEL_BACKDROP;
 
   // Focus music opacity (Feature 3)
-  const playerOpacity = running && modeIdx === 0 ? 1 : 0.75;
 
   return(
     <div style={{
@@ -474,91 +237,14 @@ export default function Pomodoro({ onNavigate }){
 
       {/* Hidden audio for ambient sounds */}
       <audio ref={ambientAudioRef} loop preload="none" style={{ display:"none" }}/>
-
-      {/* Feature 7: Video wallpaper */}
-      {videoWpUrl && (
-        <video
-          autoPlay muted loop playsInline
-          style={{
-            position:"fixed", inset:0, zIndex:0,
-            width:"100%", height:"100%",
-            objectFit:"cover",
-            transform:"translateZ(0)", // GPU accelerated
-          }}
-          src={videoWpUrl}
-        />
-      )}
-
-      {/* Feature 1: Cinematic layered wallpaper */}
-      {/* Previous wallpaper layer (fades out) */}
-      {prevWallpaper !== "none" && isTransitioning && (
-        <div style={{
-          position:"fixed", inset:0, zIndex:0, pointerEvents:"none",
-          backgroundImage:`url("${prevWallpaper}")`,
-          backgroundSize:"cover", backgroundPosition:"center",
-          backgroundAttachment:"fixed",
-          opacity: isTransitioning ? 0 : 1,
-          transition:"opacity 600ms ease",
-          transform:"translateZ(0)",
-        }}/>
-      )}
-      {/* Current wallpaper layer (fades in) */}
-      {wallpaper !== "none" && (
-        <div style={{
-          position:"fixed", inset:0, zIndex:0, pointerEvents:"none",
-          backgroundImage:`url("${wallpaper}")`,
-          backgroundSize:"cover", backgroundPosition:"center",
-          backgroundAttachment:"fixed",
-          opacity: nextWpLoaded ? 1 : 0,
-          transition:"opacity 600ms ease",
-          transform:"translateZ(0)",
-          willChange:"opacity",
-        }}/>
-      )}
-
-      {/* Wallpaper overlay */}
-      {hasBg && (
-        <div style={{
-          position:"fixed", inset:0, zIndex:1, pointerEvents:"none",
-          background:`rgba(7,7,15,${wpOverlay})`,
-          transition:"background 0.4s ease",
-        }}/>
-      )}
-
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
-        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-        html,body,#root{width:100%;overflow-x:hidden;}
-        @keyframes fadeUp   {from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes popIn    {from{opacity:0;transform:scale(.85)}to{opacity:1;transform:scale(1)}}
-        @keyframes overlayIn{from{opacity:0}to{opacity:1}}
-        @keyframes pulse    {0%,100%{opacity:1}50%{opacity:.5}}
-        @keyframes slideUp  {from{opacity:0;transform:translateY(40px)}to{opacity:1;transform:translateY(0)}}
-        @keyframes vizBar0{from{height:3px}to{height:14px}}
-        @keyframes vizBar1{from{height:3px}to{height:10px}}
-        @keyframes vizBar2{from{height:3px}to{height:16px}}
-        @keyframes vizBar3{from{height:3px}to{height:8px}}
-        .fu {animation:fadeUp .4s cubic-bezier(.22,1,.36,1) both;}
-        .fu1{animation-delay:.06s} .fu2{animation-delay:.12s}
-        .fu3{animation-delay:.18s} .fu4{animation-delay:.24s}
-        .pop{animation:popIn .35s cubic-bezier(.34,1.56,.64,1) both;}
-        .pulse-dot{animation:pulse 1.4s ease infinite;}
-        .ctrl:hover{filter:brightness(1.2);transform:scale(1.04);}
-        .ctrl:active{transform:scale(.96);}
-        .mode-tab:hover{opacity:.85;}
-        .log-row{animation:fadeUp .25s ease both;}
-        .icon-btn:hover{background:rgba(255,255,255,.08)!important;color:#fff!important;}
-        .wp-preset:hover{transform:scale(1.06);box-shadow:0 0 0 2px rgba(255,255,255,.3);}
-        .wp-preset{transition:all .15s;cursor:pointer;}
-        .amb-btn:hover{filter:brightness(1.2);}
-        input[type=number]::-webkit-inner-spin-button,
-        input[type=number]::-webkit-outer-spin-button{opacity:1;}
-        ::-webkit-scrollbar{width:4px;}
-        ::-webkit-scrollbar-thumb{background:#1f1f35;border-radius:4px;}
-        .music-float{animation:slideUp .3s cubic-bezier(.22,1,.36,1) both;}
-        .player-drag{cursor:grab;user-select:none;}
-        .player-drag:active{cursor:grabbing;}
-      `}</style>
+      <WallpaperBackground
+        wallpaper={wallpaper}
+        videoWpUrl={videoWpUrl}
+        prevWallpaper={prevWallpaper}
+        prevVisible={prevVisible}
+        nextLoaded={nextLoaded}
+        wpOverlay={wpOverlay}
+        hasBg={hasBg}/>
 
       {/* ═══ TOPBAR ═══ */}
       <header style={{
@@ -571,7 +257,7 @@ export default function Pomodoro({ onNavigate }){
         display:"flex", alignItems:"center", gap:10,
         padding:"0 16px", height:56,
       }}>
-        <button className="ctrl" onClick={()=>onNavigate("dashboard")} style={{
+        <button className="ctrl" aria-label="Go back to dashboard" onClick={()=>onNavigate("dashboard")} style={{
           ...btnBase, width:36, height:36, borderRadius:10,
           background:"rgba(255,255,255,.04)",
           border:"1px solid rgba(255,255,255,.08)",
@@ -595,15 +281,6 @@ export default function Pomodoro({ onNavigate }){
               {sessions} done ✓
             </div>
           )}
-          <button className="icon-btn" onClick={()=>setShowMusicPanel(p=>!p)} style={{
-            ...btnBase, padding:"5px 11px", borderRadius:9, fontSize:12, fontWeight:600,
-            background: hasMusic ? "rgba(250,179,86,.1)" : "rgba(255,255,255,.04)",
-            border: hasMusic ? "1px solid rgba(250,179,86,.3)" : "1px solid rgba(255,255,255,.09)",
-            color: hasMusic ? "#fab356" : "rgba(255,255,255,.38)",
-            display:"flex", alignItems:"center", gap:5,
-          }}>
-            🎵 Music {hasMusic ? "●" : ""}
-          </button>
           <button className="icon-btn" onClick={()=>setShowWpPanel(p=>!p)} style={{
             ...btnBase, padding:"5px 11px", borderRadius:9, fontSize:12, fontWeight:600,
             background: hasBg ? "rgba(167,139,250,.1)" : "rgba(255,255,255,.04)",
@@ -680,10 +357,10 @@ export default function Pomodoro({ onNavigate }){
             {/* Custom URL */}
             <p style={{ fontSize:11, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase",
               color:"rgba(255,255,255,.3)", marginBottom:8 }}>Custom Image URL</p>
-            <div style={{ display:"flex", gap:6, marginBottom:12 }}>
+            <div style={{ display:"flex", gap:6, marginBottom:20 }}>
               <input type="text" placeholder="https://example.com/image.jpg"
                 value={wpInputVal} onChange={e=>setWpInputVal(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&applyCustomUrl()}
+                onKeyDown={e=>e.key==="Enter"&&applyCustomUrl(wpInputVal)}
                 style={{ flex:1, padding:"9px 12px", borderRadius:10, fontSize:12,
                   background:"rgba(255,255,255,.05)", border:"1px solid rgba(255,255,255,.1)",
                   color:"#fff", outline:"none", fontFamily:"inherit" }}/>
@@ -699,14 +376,14 @@ export default function Pomodoro({ onNavigate }){
             <div style={{ display:"flex", gap:6, marginBottom:8 }}>
               <input type="text" placeholder="https://example.com/video.mp4"
                 value={videoInputVal} onChange={e=>setVideoInputVal(e.target.value)}
-                onKeyDown={e=>e.key==="Enter"&&applyVideoWp()}
+                onKeyDown={e=>e.key==="Enter"&&applyVideoUrl(videoInputVal)}
                 style={{ flex:1, padding:"9px 12px", borderRadius:10, fontSize:12,
                   background:"rgba(255,255,255,.05)", border:"1px solid rgba(255,255,255,.1)",
                   color:"#fff", outline:"none", fontFamily:"inherit" }}/>
               <button style={{ ...btnBase, padding:"9px 14px", borderRadius:10,
                 background:"linear-gradient(135deg,#7c3aed,#a855f7)", border:"none",
                 color:"#fff", fontWeight:700, fontSize:12 }}
-                onClick={applyVideoWp}>Apply</button>
+                onClick={() => applyVideoUrl(videoInputVal)}>Apply</button>
             </div>
             <button style={{ ...btnBase, width:"100%", padding:"10px 16px", borderRadius:10,
               background:"rgba(255,255,255,.04)", border:"1px dashed rgba(255,255,255,.15)",
@@ -715,7 +392,7 @@ export default function Pomodoro({ onNavigate }){
               🎬 Upload video file (MP4, WEBM)
             </button>
             <input ref={videoInputRef} type="file" accept="video/mp4,video/webm"
-              style={{ display:"none" }} onChange={handleVideoUpload}/>
+              style={{ display:"none" }} onChange={e => applyVideoFile(e.target.files?.[0])}/>
 
             {/* File upload */}
             <p style={{ fontSize:11, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase",
@@ -727,7 +404,7 @@ export default function Pomodoro({ onNavigate }){
               📁 Choose image file (JPG, PNG, WEBP)
             </button>
             <input ref={fileInputRef} type="file" accept="image/*"
-              style={{ display:"none" }} onChange={handleFileUpload}/>
+              style={{ display:"none" }} onChange={e => applyImageFile(e.target.files?.[0])}/>
 
             {/* Overlay darkness */}
             {hasBg && (
@@ -755,210 +432,10 @@ export default function Pomodoro({ onNavigate }){
                 <button style={{ ...btnBase, padding:"11px 14px", borderRadius:10,
                   background:"transparent", border:"1px solid rgba(255,255,255,.09)",
                   color:"rgba(255,255,255,.4)", fontSize:12 }}
-                  onClick={()=>{ setWallpaper("none"); setCustomWpUrl(""); setVideoWpUrl(""); }}>Remove</button>
+                  onClick={()=>{ clearWallpaper(); }}>Remove</button>
               )}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ═══ MUSIC PANEL ═══ */}
-      {showMusicPanel && (
-        <div style={panelStyle} onClick={()=>setShowMusicPanel(false)}>
-          <div className="fu" onClick={e=>e.stopPropagation()} style={{
-            width:"100%", maxWidth:440, background:"#0f0f1e",
-            border:"1px solid rgba(250,179,86,.2)", borderRadius:22, padding:24,
-            boxShadow:"0 0 60px rgba(250,179,86,.08)",
-          }}>
-            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
-              <div>
-                <p style={{ fontSize:17, fontWeight:800 }}>🎵 Music Player</p>
-                <p style={{ fontSize:12, color:"rgba(255,255,255,.3)", marginTop:3 }}>Paste a link to start playing</p>
-              </div>
-              <button style={{ ...btnBase, background:"transparent", border:"none", color:"rgba(255,255,255,.2)", fontSize:18 }}
-                onClick={()=>setShowMusicPanel(false)}>✕</button>
-            </div>
-
-            <div style={{ display:"flex", gap:6, marginBottom:18, background:"rgba(255,255,255,.04)",
-              borderRadius:12, padding:4 }}>
-              {["spotify","youtube"].map(tab=>(
-                <button key={tab} style={{ ...btnBase, flex:1, padding:"8px 0", borderRadius:9, fontSize:13,
-                  fontWeight:700, border:"none",
-                  background: musicTab===tab ? (tab==="spotify" ? "rgba(29,185,84,.15)" : "rgba(255,0,0,.12)") : "transparent",
-                  color: musicTab===tab ? (tab==="spotify" ? "#1db954" : "#ff4444") : "rgba(255,255,255,.35)",
-                }} onClick={()=>setMusicTab(tab)}>
-                  {tab==="spotify" ? "🟢 Spotify" : "🔴 YouTube"}
-                </button>
-              ))}
-            </div>
-
-            {musicTab==="spotify" ? (
-              <>
-                <p style={{ fontSize:11, color:"rgba(255,255,255,.3)", marginBottom:8 }}>
-                  Works with tracks, playlists, albums, artists, episodes
-                </p>
-                <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-                  <input type="text" placeholder="https://open.spotify.com/track/..."
-                    value={spotifyInput} onChange={e=>setSpotifyInput(e.target.value)}
-                    onKeyDown={e=>e.key==="Enter"&&loadSpotify()}
-                    style={{ flex:1, padding:"9px 12px", borderRadius:10, fontSize:12,
-                      background:"rgba(255,255,255,.05)", border:"1px solid rgba(255,255,255,.1)",
-                      color:"#fff", outline:"none", fontFamily:"inherit" }}/>
-                  <button style={{ ...btnBase, padding:"9px 14px", borderRadius:10,
-                    background:"linear-gradient(135deg,#1db954,#17a349)", border:"none",
-                    color:"#fff", fontWeight:700, fontSize:12 }}
-                    onClick={loadSpotify}>Load</button>
-                </div>
-                {spotifyEmbed && (
-                  <iframe src={spotifyEmbed}
-                    width="100%" height="152" frameBorder="0"
-                    allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                    loading="lazy" style={{ borderRadius:12 }}/>
-                )}
-              </>
-            ) : (
-              <>
-                <p style={{ fontSize:11, color:"rgba(255,255,255,.3)", marginBottom:8 }}>
-                  Works with YouTube & YouTube Music links or video IDs
-                </p>
-                <div style={{ display:"flex", gap:6, marginBottom:12 }}>
-                  <input type="text" placeholder="https://youtube.com/watch?v=... or video ID"
-                    value={ytInput} onChange={e=>setYtInput(e.target.value)}
-                    onKeyDown={e=>e.key==="Enter"&&loadYouTube()}
-                    style={{ flex:1, padding:"9px 12px", borderRadius:10, fontSize:12,
-                      background:"rgba(255,255,255,.05)", border:"1px solid rgba(255,255,255,.1)",
-                      color:"#fff", outline:"none", fontFamily:"inherit" }}/>
-                  <button style={{ ...btnBase, padding:"9px 14px", borderRadius:10,
-                    background:"linear-gradient(135deg,#ff4444,#cc2222)", border:"none",
-                    color:"#fff", fontWeight:700, fontSize:12 }}
-                    onClick={loadYouTube}>Load</button>
-                </div>
-                {ytId && (
-                  <div style={{ borderRadius:12, overflow:"hidden", aspectRatio:"16/9" }}>
-                    <iframe
-                      src={`https://www.youtube.com/embed/${ytId}?autoplay=1&rel=0`}
-                      width="100%" height="100%" frameBorder="0"
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen style={{ display:"block" }}/>
-                  </div>
-                )}
-              </>
-            )}
-
-            {hasMusic && (
-              <button style={{ ...btnBase, width:"100%", marginTop:12, padding:10, borderRadius:10,
-                background:"transparent", border:"1px solid rgba(255,0,0,.2)",
-                color:"rgba(255,100,100,.6)", fontSize:12 }}
-                onClick={clearMusic}>Clear player</button>
-            )}
-
-            {/* Feature 9: Ambient sounds in music panel */}
-            <div style={{ marginTop:16, paddingTop:14, borderTop:"1px solid rgba(255,255,255,.06)" }}>
-              <p style={{ fontSize:11, fontWeight:700, letterSpacing:"0.14em", textTransform:"uppercase",
-                color:"rgba(255,255,255,.3)", marginBottom:10 }}>🌿 Ambient Sounds</p>
-              <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:10 }}>
-                {AMBIENT_SOUNDS.map(s=>(
-                  <button key={s.key} className="amb-btn" style={{
-                    ...btnBase, padding:"6px 10px", borderRadius:8, fontSize:12,
-                    fontWeight:600,
-                    background: ambientKey===s.key && ambientPlaying
-                      ? "rgba(52,211,153,.15)" : "rgba(255,255,255,.04)",
-                    border: ambientKey===s.key && ambientPlaying
-                      ? "1px solid rgba(52,211,153,.35)" : "1px solid rgba(255,255,255,.09)",
-                    color: ambientKey===s.key && ambientPlaying ? "#34d399" : "rgba(255,255,255,.5)",
-                    transition:"all .2s",
-                  }} onClick={()=>toggleAmbient(s.key)}>
-                    {s.label}
-                    {ambientKey===s.key && ambientPlaying && " ▮▮"}
-                  </button>
-                ))}
-              </div>
-              {ambientPlaying && (
-                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                  <span style={{ fontSize:11, color:"rgba(255,255,255,.3)", flexShrink:0 }}>Vol</span>
-                  <input type="range" min={0} max={100} value={Math.round(ambientVol*100)}
-                    onChange={e=>setAmbientVol(Number(e.target.value)/100)}
-                    style={{ flex:1, accentColor:"#34d399", cursor:"pointer" }}/>
-                  <span style={{ fontSize:11, color:"rgba(255,255,255,.3)", width:28, flexShrink:0 }}>
-                    {Math.round(ambientVol*100)}%
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <button style={{ ...btnBase, width:"100%", marginTop:12, padding:11, borderRadius:10,
-              background:"rgba(255,255,255,.04)", border:"1px solid rgba(255,255,255,.09)",
-              color:"rgba(255,255,255,.5)", fontSize:12, fontWeight:600 }}
-              onClick={()=>setShowMusicPanel(false)}>Close</button>
-          </div>
-        </div>
-      )}
-
-      {/* ═══ FLOATING MINI MUSIC PLAYER (Feature 3 + 10) ═══ */}
-      {hasMusic && !showMusicPanel && (
-        <div
-          ref={playerRef}
-          className="music-float player-drag"
-          onMouseDown={onPlayerMouseDown}
-          style={{
-            position:"fixed",
-            ...playerPos,
-            zIndex:100,
-            background:"rgba(10,10,22,.93)",
-            backdropFilter:"blur(20px)",
-            WebkitBackdropFilter:"blur(20px)",
-            border:"1px solid rgba(250,179,86,.2)",
-            borderRadius:16,
-            boxShadow:"0 8px 40px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.07)",
-            width: musicMinimized ? "auto" : (spotifyEmbed ? 300 : 320),
-            overflow:"hidden",
-            opacity: playerOpacity,
-            transition:"opacity 0.4s ease, box-shadow 0.3s ease",
-            cursor: isDragging ? "grabbing" : "grab",
-          }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-            padding:"8px 12px",
-            borderBottom: musicMinimized ? "none" : "1px solid rgba(255,255,255,.06)" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
-              <span style={{ fontSize:11, fontWeight:700, color:"rgba(255,255,255,.45)" }}>
-                {spotifyEmbed ? "🟢 Spotify" : "🔴 YouTube"}
-              </span>
-              {/* Feature 5: Visualizer in mini player */}
-              <Visualizer active={running && !musicMinimized} color={mode.color}/>
-            </div>
-            <div style={{ display:"flex", gap:4 }}>
-              <button style={{ ...btnBase, background:"transparent", border:"none",
-                color:"rgba(255,255,255,.3)", fontSize:13, padding:"2px 5px" }}
-                onClick={()=>setMusicMinimized(m=>!m)}>
-                {musicMinimized ? "⬆" : "⬇"}
-              </button>
-              <button style={{ ...btnBase, background:"transparent", border:"none",
-                color:"rgba(255,255,255,.3)", fontSize:13, padding:"2px 5px" }}
-                onClick={()=>setShowMusicPanel(true)}>↗</button>
-              <button style={{ ...btnBase, background:"transparent", border:"none",
-                color:"rgba(255,100,100,.4)", fontSize:13, padding:"2px 5px" }}
-                onClick={clearMusic}>✕</button>
-            </div>
-          </div>
-
-          {!musicMinimized && (
-            <div style={{ transition:"all 0.35s ease" }}>
-              {spotifyEmbed && (
-                <iframe src={spotifyEmbed}
-                  width="300" height="80" frameBorder="0"
-                  allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
-                  loading="lazy" style={{ display:"block" }}/>
-              )}
-              {ytId && !spotifyEmbed && (
-                <div style={{ aspectRatio:"16/9" }}>
-                  <iframe src={`https://www.youtube.com/embed/${ytId}?autoplay=1&rel=0`}
-                    width="320" height="180" frameBorder="0"
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                    allowFullScreen style={{ display:"block" }}/>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -984,7 +461,7 @@ export default function Pomodoro({ onNavigate }){
               { key:"short", label:"Short Break",   color:"#60a5fa", max:30 },
               { key:"long",  label:"Long Break",    color:"#a78bfa", max:60 },
             ].map(item=>(
-              <div key={item.key} style={{ marginBottom:12, padding:"14px 16px",
+              <div key={item.key} style={{ marginBottom:20, padding:"14px 16px",
                 background:"rgba(255,255,255,.025)",
                 border:"1px solid rgba(255,255,255,.06)", borderRadius:14 }}>
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:10 }}>
@@ -1021,7 +498,7 @@ export default function Pomodoro({ onNavigate }){
                 background:"linear-gradient(135deg,#7c3aed,#a855f7)",
                 color:"#fff", fontWeight:800, fontSize:13,
                 boxShadow:"0 4px 18px rgba(124,58,237,.4)" }}
-                onClick={saveSettings}>Save & Reset</button>
+                onClick={() => saveSettings(editVals)}>Save & Reset</button>
               <button style={{ ...btnBase, padding:"12px 14px", borderRadius:10,
                 background:"transparent", border:"1px solid rgba(255,255,255,.09)",
                 color:"rgba(255,255,255,.4)", fontSize:13 }}
@@ -1037,7 +514,7 @@ export default function Pomodoro({ onNavigate }){
 
       {/* ═══ MAIN ═══ */}
       <main style={{ position:"relative", zIndex:2, width:"100%", maxWidth:820, margin:"0 auto",
-        padding:"20px clamp(14px,4vw,40px) 80px" }}>
+        padding:"28px clamp(14px,4vw,40px) 80px" }}>
 
         {/* Mode tabs */}
         <div className="fu" style={{ display:"flex", gap:8,
@@ -1087,7 +564,10 @@ export default function Pomodoro({ onNavigate }){
             <Ring pct={pct} size={ringSize} stroke={10} color={mode.color} accentColor={accentColor}/>
             <div style={{ position:"absolute", inset:0, display:"flex",
               flexDirection:"column", alignItems:"center", justifyContent:"center", gap:6 }}>
-              <span style={{ fontSize:"clamp(48px,13vw,78px)", fontWeight:900,
+              <span
+                role="timer" aria-live="off"
+                aria-label={formatTimerAriaLabel(seconds, mode.label)}
+                style={{ fontSize:"clamp(48px,13vw,78px)", fontWeight:900,
                 letterSpacing:"-4px", lineHeight:1, color: accentColor || mode.color,
                 textShadow:`0 0 50px ${(accentColor||mode.color)}66`,
                 fontVariantNumeric:"tabular-nums", transition:"color 0.6s ease, text-shadow 0.6s ease" }}>
@@ -1120,29 +600,40 @@ export default function Pomodoro({ onNavigate }){
               borderRadius:14, background:"rgba(255,255,255,.04)",
               border:"1px solid rgba(255,255,255,.08)",
               color:"rgba(255,255,255,.4)", fontSize:18,
-              display:"flex", alignItems:"center", justifyContent:"center" }}>↺</button>
-            <button className="ctrl" onClick={()=>setRunning(r=>!r)} style={{ ...btnBase,
-              width:72, height:72, borderRadius:"50%",
-              background: running ? "rgba(255,255,255,.06)" : `linear-gradient(135deg,${accentColor||mode.color},${(accentColor||mode.color)}bb)`,
-              border:`2px solid ${running ? "rgba(255,255,255,.12)" : (accentColor||mode.color)}`,
-              color: running ? (accentColor||mode.color) : "#000",
-              fontSize:22, fontWeight:800,
-              display:"flex", alignItems:"center", justifyContent:"center",
-              boxShadow: running ? "none" : `0 0 28px ${effectiveGlow}`,
-              transition:"all 0.3s ease",
-            }}>
-              {running ? "⏸" : "▶"}
-            </button>
-            <button className="ctrl" onClick={skipToNext} style={{ ...btnBase, width:46, height:46,
+              display:"flex", alignItems:"center", justifyContent:"center" }}aria-label="Reset timer">↺</button>
+            <button
+               className="ctrl"
+                onClick={toggle}
+                aria-label={running ? "Pause timer" : "Start timer"}
+                style={{
+               ...btnBase,
+               width:72,
+                height:72,
+                 borderRadius:"50%",
+                  background: running
+                 ? "rgba(255,255,255,.06)"
+                  : `linear-gradient(135deg,${accentColor||mode.color},${(accentColor||mode.color)}bb)`,
+                  border:`2px solid ${running ? "rgba(255,255,255,.12)" : (accentColor||mode.color)}`,
+                  color: running ? (accentColor||mode.color) : "#000",
+                  fontSize:22,
+                  fontWeight:800,
+                  display:"flex",
+                  alignItems:"center",
+                  justifyContent:"center",
+                  boxShadow: running ? "none" : `0 0 28px ${effectiveGlow}`,
+                  transition:"all 0.3s ease",
+                  }}
+                  >{running ? "⏸" : "▶"}</button>
+            <button className="ctrl" onClick={skip} style={{ ...btnBase, width:46, height:46,
               borderRadius:14, background:"rgba(255,255,255,.04)",
               border:"1px solid rgba(255,255,255,.08)",
               color:"rgba(255,255,255,.4)", fontSize:18,
-              display:"flex", alignItems:"center", justifyContent:"center" }}>⏭</button>
+              display:"flex", alignItems:"center", justifyContent:"center" }}aria-label="Skip to next mode">⏭</button>
           </div>
         </div>
 
         {/* Stats — Feature 2: glassmorphism */}
-        <div className="fu fu2" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:12 }}>
+        <div className="fu fu2" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:20 }}>
           {[
             { label:"Sessions",    val:sessions,                        color:"#34d399", glow:"rgba(52,211,153,.2)"  },
             { label:"Full Cycles", val:cycles,                          color:"#a78bfa", glow:"rgba(167,139,250,.2)" },
@@ -1225,8 +716,8 @@ export default function Pomodoro({ onNavigate }){
               ))}
             </div>
           </div>
-        )}
+         )}
       </main>
     </div>
-  );
+   );
 }
