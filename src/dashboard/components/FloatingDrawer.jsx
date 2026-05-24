@@ -2,6 +2,8 @@ import { signOut } from "firebase/auth";
 import { auth } from "../../firebase";
 import { C } from "../utils/dashboardConstants";
 
+const COLLADO_FOCUS_URL = "https://collado-focus.vercel.app/";
+
 export default function FloatingDrawer({
   menuOpen,
   setMenuOpen,
@@ -130,6 +132,76 @@ export default function FloatingDrawer({
               {item.label}
             </button>
           ))}
+
+          <div style={{
+            margin:"16px 2px 0",
+            padding:"16px",
+            borderRadius:24,
+            background:"linear-gradient(145deg,rgba(255,255,255,.085),rgba(255,255,255,.04))",
+            border:"1px solid rgba(255,255,255,.10)",
+            boxShadow:"inset 0 1px 0 rgba(255,255,255,.12), 0 14px 38px rgba(0,0,0,.22), 0 0 34px rgba(76,215,246,.055)",
+          }}>
+            <div style={{ display:"flex", alignItems:"flex-start", gap:12, marginBottom:14 }}>
+              <span style={{
+                width:34,
+                height:34,
+                borderRadius:14,
+                flexShrink:0,
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                background:"linear-gradient(135deg,rgba(192,193,255,.18),rgba(76,215,246,.12))",
+                border:"1px solid rgba(192,193,255,.20)",
+                color:"#c0c1ff",
+                fontSize:15,
+                fontWeight:900,
+                boxShadow:"inset 0 1px 0 rgba(255,255,255,.12)",
+              }}>
+                ◌
+              </span>
+              <div style={{ minWidth:0 }}>
+                <p style={{ fontSize:14, fontWeight:850, color:"rgba(245,245,247,.94)", letterSpacing:"-0.2px" }}>
+                  Focus Mode
+                </p>
+                <p style={{ fontSize:12, lineHeight:1.45, color:"rgba(229,226,227,.48)", marginTop:3 }}>
+                  Open the standalone immersive focus timer.
+                </p>
+              </div>
+            </div>
+            <a
+              href={COLLADO_FOCUS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn-base"
+              style={{
+                width:"100%",
+                minHeight:42,
+                borderRadius:18,
+                background:"rgba(192,193,255,.13)",
+                border:"1px solid rgba(192,193,255,.22)",
+                color:"#c0c1ff",
+                fontSize:12,
+                fontWeight:850,
+                textDecoration:"none",
+                display:"flex",
+                alignItems:"center",
+                justifyContent:"center",
+                boxShadow:"inset 0 1px 0 rgba(255,255,255,.12)",
+              }}
+              onMouseOver={e=>{
+                e.currentTarget.style.background="rgba(76,215,246,.14)";
+                e.currentTarget.style.borderColor="rgba(76,215,246,.28)";
+                e.currentTarget.style.color="#4cd7f6";
+              }}
+              onMouseOut={e=>{
+                e.currentTarget.style.background="rgba(192,193,255,.13)";
+                e.currentTarget.style.borderColor="rgba(192,193,255,.22)";
+                e.currentTarget.style.color="#c0c1ff";
+              }}
+            >
+              Open CollaDO Focus
+            </a>
+          </div>
         </div>
 
         <div style={{ padding:"16px", borderTop:"1px solid rgba(255,255,255,.07)" }}>
